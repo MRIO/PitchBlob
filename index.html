@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Chorus Blobs (prototype)</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      --ui-bg: #0b0f17;
+      --ui-fg: #e8eefc;
+      --ui-border: #2a3a5c;
+
+      /* Theme-controlled background */
+      --bg-a: #121a2a;
+      --bg-b: #070a10;
+      --bg-c: #05070c;
+    }
+    body { margin: 0; background: var(--ui-bg); color: var(--ui-fg); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+    h1 { margin: 8px 0 12px; font-size: 18px; font-weight: 650; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    button, select, input {
+      background: #162033; color: var(--ui-fg); border: 1px solid var(--ui-border);
+      border-radius: 12px; padding: 10px 12px; font-size: 14px;
+    }
+    button:disabled { opacity: 0.5; }
+    .pill { padding: 8px 10px; border: 1px solid var(--ui-border); border-radius: 999px; font-size: 13px; }
+    canvas {
+      width: 100%; height: min(64vh, 520px);
+      display: block; border-radius: 18px;
+      border: 1px solid #22304c;
+      background: radial-gradient(1200px 700px at 50% 20%, var(--bg-a) 0%, var(--bg-b) 55%, var(--bg-c) 100%);
+      margin-top: 14px;
+      touch-action: manipulation;
+    }
+    .msg { margin-top: 10px; min-height: 22px; font-size: 14px; color: #cfe0ff; }
+    .hint { opacity: 0.8; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Chorus Blobs — pitch match game (prototype)</h1>
+
+    <div class="row">
+      <button id="startAudioBtn">Start Audio</button>
+      <button id="newRoundBtn" disabled>New Round</button>
+      <button id="replayBtn" disabled>Replay</button>
+
+      <span class="pill">Level:
+        <select id="levelSel">
+          <option value="3">3 blobs</option>
+          <option value="4" selected>4 blobs</option>
+          <option value="5">5 blobs</option>
+          <option value="6">6 blobs</option>
+          <option value="7">7 blobs</option>
+          <option value="8">8 blobs</option>
+        </select>
+      </span>
+
+      <span class="pill">Theme:
+        <select id="themeSel">
+          <option value="candy" selected>Candy</option>
+          <option value="princess">Princess</option>
+          <option value="ocean">Ocean</option>
+          <option value="sunset">Sunset</option>
+          <option value="forest">Forest</option>
+          <option value="space">Space</option>
+        </select>
+      </span>
+
+      <span class="pill">Timbre:
+        <select id="waveSel">
+          <option value="sine" selected>sine</option>
+          <option value="triangle">triangle</option>
+          <option value="square">square</option>
+          <option value="sawtooth">sawtooth</option>
+        </select>
+      </span>
+
+      <span class="pill">Speed:
+        <select id="speedSel">
+          <option value="0.55">slow</option>
+          <option value="0.42" selected>normal</option>
+          <option value="0.30">fast</option>
+        </select>
+      </span>
+
+      <span class="pill">Score: <span id="score">0</span></span>
+    </div>
+
+    <canvas id="c"></canvas>
+    <div class="msg" id="msg"></div>
+    <div class="hint">Tip: iPad Safari requires a tap to enable audio — use “Start Audio” first.</div>
+  </div>
+
+<script>
+(() => {
+  // ---------- DOM ----------
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const startAudioBtn = document.getElementById("startAudioBtn");
+  const newRoundBtn = document.getElementById("newRoundBtn");
+  const replayBtn = document.getElementById("replayBtn");
+  const levelSel = document.getElementById("levelSel");
+  const themeSel = document.getElementById("themeSel");
+  const waveSel = document.getElementById("waveSel");
+  const speedSel = document.getElementById("speedSel");
+  const msgEl = document.getElementById("msg");
+  const scoreEl = document.getElementById("score");
+
+  // ---------- Themes / palettes ----------
+  const THEMES = {
+    candy: {
+      name: "Candy",
+      bg: ["#1a1a3a", "#0b0f17", "#070813"],
+      blobFill: "#6EE7FF",
+      blobActive: "#C8FFF0",
+      kingFill: "#FFB3D9",
+      kingActive: "#FFE08A",
+      faceInk: "#0b0f17",
+      crownFill: "#FFD56A",
+      crownGem: "#7C5CFF",
+      popCorrect: "rgba(255,211,110,", // warm gold
+      popWrong:   "rgba(110,231,255,"  // bright cyan
+    },
+    princess: {
+      name: "Princess",
+      bg: ["#2a1034", "#0b0f17", "#0c0610"],
+      blobFill: "#FF9AD5",
+      blobActive: "#FFD1F0",
+      kingFill: "#C9B6FF",
+      kingActive: "#FFF0A8",
+      faceInk: "#0b0f17",
+      crownFill: "#FFE08A",
+      crownGem: "#FF5FA2",
+      popCorrect: "rgba(255,240,168,",
+      popWrong:   "rgba(255,154,213,"
+    },
+    ocean: {
+      name: "Ocean",
+      bg: ["#0a2b3a", "#08131a", "#05090f"],
+      blobFill: "#52FFD6",
+      blobActive: "#B6FFF1",
+      kingFill: "#66B6FF",
+      kingActive: "#FFE08A",
+      faceInk: "#061018",
+      crownFill: "#FFD56A",
+      crownGem: "#52FFD6",
+      popCorrect: "rgba(82,255,214,",
+      popWrong:   "rgba(102,182,255,"
+    },
+    sunset: {
+      name: "Sunset",
+      bg: ["#3a1230", "#140a1a", "#07060c"],
+      blobFill: "#FF8A5B",
+      blobActive: "#FFD7A8",
+      kingFill: "#FF5FB3",
+      kingActive: "#FFE08A",
+      faceInk: "#140a1a",
+      crownFill: "#FFE08A",
+      crownGem: "#7C5CFF",
+      popCorrect: "rgba(255,215,168,",
+      popWrong:   "rgba(255,138,91,"
+    },
+    forest: {
+      name: "Forest",
+      bg: ["#112b1b", "#07110b", "#05070c"],
+      blobFill: "#7CFF7A",
+      blobActive: "#D7FFD6",
+      kingFill: "#B6FF8A",
+      kingActive: "#FFE08A",
+      faceInk: "#07110b",
+      crownFill: "#FFD56A",
+      crownGem: "#4DE2FF",
+      popCorrect: "rgba(124,255,122,",
+      popWrong:   "rgba(182,255,138,"
+    },
+    space: {
+      name: "Space",
+      bg: ["#17103a", "#080a12", "#04040b"],
+      blobFill: "#A78BFF",
+      blobActive: "#E0D6FF",
+      kingFill: "#4DE2FF",
+      kingActive: "#FFE08A",
+      faceInk: "#070813",
+      crownFill: "#FFE08A",
+      crownGem: "#FF5FB3",
+      popCorrect: "rgba(255,224,138,",
+      popWrong:   "rgba(167,139,255,"
+    }
+  };
+
+  let currentThemeKey = themeSel.value;
+  function theme() { return THEMES[currentThemeKey] || THEMES.candy; }
+
+  function applyTheme() {
+    const th = theme();
+    const root = document.documentElement;
+    root.style.setProperty("--bg-a", th.bg[0]);
+    root.style.setProperty("--bg-b", th.bg[1]);
+    root.style.setProperty("--bg-c", th.bg[2]);
+    // message tint tracks theme a bit
+    msgEl.style.color = "#cfe0ff";
+  }
+
+  // ---------- Audio ----------
+  let audioCtx = null;
+  let master = null;
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      master = audioCtx.createGain();
+      master.gain.value = 0.18;
+      master.connect(audioCtx.destination);
+    }
+    return audioCtx;
+  }
+
+  function now() { return audioCtx ? audioCtx.currentTime : 0; }
+
+  function playTone(freq, t0, dur, wave = "sine") {
+    const ac = ensureAudio();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+
+    osc.type = wave;
+    osc.frequency.setValueAtTime(freq, t0);
+
+    // Simple "sing" envelope
+    const a = 0.015, r = 0.08;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(1.0, t0 + a);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur + r);
+
+    osc.connect(gain);
+    gain.connect(master);
+
+    osc.start(t0);
+    osc.stop(t0 + dur + r + 0.02);
+  }
+
+  // ---------- Music notes ----------
+  const NOTE_FREQS = [
+    261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25
+  ];
+
+  function pickUniqueNotes(n) {
+    const pool = NOTE_FREQS.slice();
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, n);
+  }
+
+  // ---------- Game state ----------
+  let blobs = [];      // chorus blobs + king as last element
+  let targetIndex = -1;
+  let accepting = false;
+  let lastSequence = null;
+  let score = 0;
+  let particles = [];
+
+  function setMsg(s) { msgEl.textContent = s; }
+
+  // ---------- Resize / layout ----------
+  function resize() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    layoutBlobs();
+  }
+
+  function layoutBlobs() {
+    const n = parseInt(levelSel.value, 10);
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+
+    const pad = 60;
+    const rowY = h * 0.62;
+    const kingY = h * 0.28;
+
+    const spacing = (w - 2 * pad) / Math.max(1, (n - 1));
+    const r = Math.max(18, Math.min(40, (w / (n + 2))));
+
+    const oldFreqs = blobs.filter(b => !b.isKing).map(b => b.freq);
+
+    blobs = [];
+    for (let i = 0; i < n; i++) {
+      blobs.push({
+        x: pad + i * spacing,
+        y: rowY,
+        r,
+        freq: oldFreqs[i] ?? NOTE_FREQS[i % NOTE_FREQS.length],
+        isKing: false,
+        isActive: false
+      });
+    }
+    blobs.push({
+      x: w * 0.5,
+      y: kingY,
+      r: r * 1.15,
+      freq: 440,
+      isKing: true,
+      isActive: false
+    });
+  }
+
+  window.addEventListener("resize", resize);
+
+  // ---------- Drawing ----------
+  function drawBlob(b, t) {
+    const th = theme();
+
+    // Body wobble
+    const wobble = 1 + 0.04 * Math.sin(t * 3 + (b.x + b.y) * 0.01);
+    const rr = b.r * wobble;
+
+    // Glow when active
+    if (b.isActive) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, rr * 1.55, 0, Math.PI * 2);
+      ctx.fillStyle = b.isKing ? th.kingActive : th.blobActive;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Body fill
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, rr, 0, Math.PI * 2);
+    ctx.fillStyle = b.isKing ? th.kingFill : th.blobFill;
+    ctx.fill();
+
+    // Eyes
+    const eyeY = b.y - rr * 0.18;
+    const eyeDX = rr * 0.28;
+    const eyeR = rr * 0.12;
+    ctx.fillStyle = th.faceInk;
+    ctx.beginPath();
+    ctx.arc(b.x - eyeDX, eyeY, eyeR, 0, Math.PI * 2);
+    ctx.arc(b.x + eyeDX, eyeY, eyeR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mouth
+    ctx.strokeStyle = th.faceInk;
+    ctx.lineWidth = Math.max(2, rr * 0.06);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    const mouthW = rr * 0.45;
+    const mouthY = b.y + rr * 0.22;
+    if (b.isActive) {
+      ctx.arc(b.x, mouthY, mouthW * 0.45, 0, Math.PI, false);
+    } else {
+      ctx.moveTo(b.x - mouthW * 0.5, mouthY);
+      ctx.lineTo(b.x + mouthW * 0.5, mouthY);
+    }
+    ctx.stroke();
+
+    // Crown for king (4 triangles, bases touching, slight overlap with head)
+    if (b.isKing) {
+      ctx.save();
+      ctx.fillStyle = th.crownFill;
+
+      const crownW = rr * 1.10;          // total crown width
+      const crownH = rr * 0.55;          // triangle height
+      const overlap = rr * 0.12;         // crown overlaps head a bit
+      const baseY = (b.y - rr) + overlap;
+
+      const leftX = b.x - crownW / 2;
+      const segW = crownW / 4;
+
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const x0 = leftX + i * segW;
+        const x1 = x0 + segW;
+        const xm = (x0 + x1) / 2;
+
+        ctx.moveTo(x0, baseY);
+        ctx.lineTo(xm, baseY - crownH);
+        ctx.lineTo(x1, baseY);
+        ctx.closePath();
+      }
+      ctx.fill();
+
+      // little gems on the peaks
+      ctx.fillStyle = th.crownGem;
+      for (let i = 0; i < 4; i++) {
+        const xm = leftX + (i + 0.5) * segW;
+        ctx.beginPath();
+        ctx.arc(xm, baseY - crownH, rr * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+  }
+
+  function spawnPop(x, y, baseColor) {
+    for (let i = 0; i < 26; i++) {
+      particles.push({
+        x, y,
+        vx: (Math.random() * 2 - 1) * 220,
+        vy: (Math.random() * 2 - 1) * 220,
+        life: 0.65 + Math.random() * 0.35,
+        age: 0,
+        r: 2 + Math.random() * 3,
+        col: baseColor
+      });
+    }
+  }
+
+  function drawParticles(dt) {
+    for (const p of particles) {
+      p.age += dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 260 * dt;
+    }
+    particles = particles.filter(p => p.age < p.life);
+
+    for (const p of particles) {
+      const a = 1 - (p.age / p.life);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fillStyle = p.col + a.toFixed(3) + ")";
+      ctx.fill();
+    }
+  }
+
+  let lastT = performance.now() / 1000;
+  function frame() {
+    const t = performance.now() / 1000;
+    const dt = Math.min(0.033, t - lastT);
+    lastT = t;
+
+    const rect = canvas.getBoundingClientRect();
+    ctx.clearRect(0, 0, rect.width, rect.height);
+
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = "#cfe0ff";
+    ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+    ctx.fillText("Tap the blob that matches the King’s note", 16, 22);
+    ctx.restore();
+
+    for (const b of blobs) drawBlob(b, t);
+    drawParticles(dt);
+
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- Sequencing ----------
+  async function startRound() {
+    const ac = ensureAudio();
+    await ac.resume();
+
+    const n = parseInt(levelSel.value, 10);
+    const speed = parseFloat(speedSel.value);
+    const wave = waveSel.value;
+
+    const notes = pickUniqueNotes(n);
+    for (let i = 0; i < n; i++) blobs[i].freq = notes[i];
+    targetIndex = (Math.random() * n) | 0;
+
+    const king = blobs[blobs.length - 1];
+    king.freq = blobs[targetIndex].freq;
+
+    accepting = false;
+    replayBtn.disabled = true;
+    setMsg("Listen…");
+
+    const t0 = now() + 0.08;
+    const dur = speed;
+    const gap = 0.08;
+
+    lastSequence = { dur, gap, wave, targetIndex, notes: notes.slice() };
+
+    for (let i = 0; i < n; i++) {
+      const ti = t0 + i * (dur + gap);
+      scheduleBlobSing(i, ti, dur);
+      playTone(blobs[i].freq, ti, dur, wave);
+    }
+
+    const kingTime = t0 + n * (dur + gap) + 0.10;
+    scheduleKingSing(kingTime, dur * 1.15);
+    playTone(king.freq, kingTime, dur * 1.15, wave);
+
+    const acceptTime = kingTime + dur * 1.15 + 0.05;
+    window.setTimeout(() => {
+      accepting = true;
+      replayBtn.disabled = false;
+      setMsg("Your turn: tap the matching blob!");
+    }, Math.max(0, (acceptTime - now()) * 1000));
+  }
+
+  function replay() {
+    if (!lastSequence || !audioCtx) return;
+
+    const ac = ensureAudio();
+    ac.resume();
+
+    const { dur, gap, wave, notes, targetIndex: ti } = lastSequence;
+    const n = notes.length;
+
+    for (let i = 0; i < n; i++) blobs[i].freq = notes[i];
+    targetIndex = ti;
+
+    const king = blobs[blobs.length - 1];
+    king.freq = blobs[targetIndex].freq;
+
+    accepting = false;
+    setMsg("Replay…");
+
+    const t0 = now() + 0.08;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + i * (dur + gap);
+      scheduleBlobSing(i, t, dur);
+      playTone(blobs[i].freq, t, dur, wave);
+    }
+    const kingTime = t0 + n * (dur + gap) + 0.10;
+    scheduleKingSing(kingTime, dur * 1.15);
+    playTone(king.freq, kingTime, dur * 1.15, wave);
+
+    const acceptTime = kingTime + dur * 1.15 + 0.05;
+    window.setTimeout(() => {
+      accepting = true;
+      setMsg("Your turn: tap the matching blob!");
+    }, Math.max(0, (acceptTime - now()) * 1000));
+  }
+
+  function scheduleBlobSing(i, tStart, dur) {
+    const ms = Math.max(0, (tStart - now()) * 1000);
+    window.setTimeout(() => {
+      blobs[i].isActive = true;
+      window.setTimeout(() => blobs[i].isActive = false, dur * 1000);
+    }, ms);
+  }
+
+  function scheduleKingSing(tStart, dur) {
+    const king = blobs[blobs.length - 1];
+    const ms = Math.max(0, (tStart - now()) * 1000);
+    window.setTimeout(() => {
+      king.isActive = true;
+      window.setTimeout(() => king.isActive = false, dur * 1000);
+    }, ms);
+  }
+
+  // ---------- Input ----------
+  function canvasToLocal(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left), y: (e.clientY - rect.top) };
+  }
+
+  function hitTestBlob(x, y) {
+    for (let i = 0; i < blobs.length - 1; i++) {
+      const b = blobs[i];
+      const dx = x - b.x, dy = y - b.y;
+      if (dx * dx + dy * dy <= (b.r * 1.15) ** 2) return i;
+    }
+    return -1;
+  }
+
+  function handlePick(i) {
+    if (!accepting || i < 0) return;
+
+    accepting = false;
+    const correct = (i === targetIndex);
+    const th = theme();
+
+    if (correct) {
+      score += 1;
+      scoreEl.textContent = String(score);
+      setMsg("✅ Correct! New Round?");
+      spawnPop(blobs[i].x, blobs[i].y, th.popCorrect);
+
+      if (audioCtx) {
+        const t = now() + 0.02;
+        playTone(660, t, 0.08, "sine");
+        playTone(990, t + 0.10, 0.08, "sine");
+      }
+    } else {
+      setMsg("💥 Oops — try again (Replay) or New Round!");
+      spawnPop(blobs[i].x, blobs[i].y, th.popWrong);
+
+      if (audioCtx) {
+        const t = now() + 0.02;
+        playTone(180, t, 0.10, "triangle");
+      }
+      window.setTimeout(() => { accepting = true; }, 250);
+    }
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const { x, y } = canvasToLocal(e);
+    handlePick(hitTestBlob(x, y));
+  });
+
+  // ---------- Controls ----------
+  startAudioBtn.addEventListener("click", async () => {
+    const ac = ensureAudio();
+    await ac.resume();
+    startAudioBtn.textContent = "Audio Ready";
+    startAudioBtn.disabled = true;
+    newRoundBtn.disabled = false;
+    replayBtn.disabled = true;
+    setMsg("Audio enabled. Tap “New Round”.");
+  });
+
+  newRoundBtn.addEventListener("click", () => {
+    layoutBlobs();
+    startRound();
+  });
+
+  replayBtn.addEventListener("click", () => replay());
+
+  levelSel.addEventListener("change", () => {
+    layoutBlobs();
+    setMsg("Level changed. Tap “New Round”.");
+    replayBtn.disabled = true;
+  });
+
+  themeSel.addEventListener("change", () => {
+    currentThemeKey = themeSel.value;
+    applyTheme();
+  });
+
+  // ---------- Init ----------
+  applyTheme();
+  resize();
+  requestAnimationFrame(frame);
+  setMsg("Tap “Start Audio” to begin.");
+})();
+</script>
+</body>
+</html>
